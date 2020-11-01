@@ -1,0 +1,484 @@
+---
+title: "Case Study : US Health Insurance"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Problem Statement
+
+In this project, we attempt to analyze and explore the US Health Insurance dataset for medical costs in order to derive valuable insights, and find answers to questions through statistical hypothesis testing.
+
+Objectives:
+1. Exploratory Data Analysis
+2. Hypothesis Testing
+
+The data contains medical costs of people characterized by certain attributes.
+Viewing the summary of the data.
+
+```{r load packages, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(GGally)
+library(rmarkdown)
+library(knitr)
+library(fitdistrplus)
+library(reshape2)
+options(warn=-1)
+```
+
+```{r input, echo=FALSE}
+us_health_insurrance <- read.csv('US_Health_Insurance.csv', header = TRUE, sep = ',')
+kable(head(us_health_insurrance, format = 'markdown')) #structure of the dataset
+```
+
+## 1. Graphical Analysis
+
+The relationship between insurance charges, age and smoking status (smoker/non-smoker) can be seen using a scatter plot.
+As can be observed, with increasing age the insurance charges increase in individuals.
+In addition, the insurance charges are higher for individuals who smoke.
+
+```{r scatter plot,echo=FALSE,fig.height=3.5,fig.width=5.5, fig.align = "center"}
+ggplot(us_health_insurrance, aes(x = age, y = charges)) +
+  geom_point(aes(color = smoker)) + 
+  theme_bw() +
+  ggtitle("Scatter Plot of Age and Charges based on Smoking Status") +         
+  xlab("Age of the Individual") +         
+  ylab("Medical Charges of the Individual")
+```
+
+Exploring the relationship between insurance charges, gender, and smoking status (smoker/non-smoker) using a box plot.
+As can be observed, there is a significant difference in the insurance charges based on smoking status. Individuals who smoke have a higher insurance charge than individuals who do not. Moreover, even for individuals who smoke, the insurance chargers are higher in men. 
+
+```{r box plot, echo=FALSE, fig.height = 3.5, fig.width = 5.5, fig.align = "center"}
+ggplot(us_health_insurrance, aes(x=smoker, y=charges, colour = sex)) + 
+  geom_boxplot() + 
+  theme_bw() +
+  ggtitle("Box Plot of Charges based on Gender and Smoking Status") +         
+  xlab("Smoking Preference of the Individual") +         
+  ylab("Medical Charges of the Individual")
+```
+
+Viewing the changing in the insurance charges based on the region and smoking status using a bar plot. The medical charges of individuals are higher in the SouthEast region. Even so, the number of smokers in this region are higher compared to other regions. Are the number of smoking individuals increasing the overall medical charges in the SouthEast Region?
+
+```{r bar graph, echo=FALSE, fig.height = 3.5, fig.width = 5.5, fig.align = "center"}
+ggplot(us_health_insurrance, aes(x=region, y=charges, fill = smoker)) + 
+  geom_bar(stat="identity") +
+  scale_fill_brewer(palette="Oranges")+
+  theme_bw() +
+  ggtitle("Bar Plot of Charges based on Region and Smoking Status") +         
+  xlab("Region") +         
+  ylab("Medical Charges of the Individual")
+```
+
+## 2. Joint Distribution for Age and Number of Children
+
+To get an idea on how frequently an individual can be of a particular age group and have children (either no children or have children), we obtain the joint probability distribution.
+```{r age labels, include=FALSE}
+agelabels <- c("0-9","10-19","20-29","30-39","40-49","50-59","60-69","70-79",
+               "80-89","90-100")
+us_health_insurrance$age_groups <- cut(us_health_insurrance$age, breaks=seq(0, 100, 10), 
+                                       right = FALSE, labels = agelabels)
+```
+
+```{r age frequency, include=FALSE}
+age_freq <- us_health_insurrance %>%
+  dplyr::select(age_groups) %>%
+  group_by(age_groups) %>%
+  dplyr::summarise(count_age = n()) %>%
+  mutate(age_pmf = count_age/sum(count_age)) %>% 
+  mutate(age_cdf = cumsum(age_pmf))
+age_freq
+```
+
+```{r child frequency, include=FALSE}
+child_freq <- us_health_insurrance %>%
+  dplyr::select(children) %>%
+  group_by(children) %>%
+  dplyr::summarise(count_child = n()) %>%
+  mutate(child_pmf = count_child/sum(count_child)) %>% 
+  mutate(child_cdf = cumsum(child_pmf))
+child_freq
+```
+
+The joint probability distribution is obtained as follows: 
+
+```{r joint frequency, echo=FALSE}
+joint_freq <- outer(age_freq$count_age, child_freq$count_child, FUN = "+")
+
+joint_prob <- round(joint_freq/sum(joint_freq),3) 
+joint_prob
+#kable(joint_prob, format = 'markdown')
+```
+
+## 3. Are age and number of children correlated? 
+
+Visual representation of the frequency of age and number of children. 
+```{r joint df, include=FALSE}
+joint_df <- melt(joint_freq)
+colnames(joint_df) <- c('Age', 'Child', 'Frequency')
+head(joint_df)
+```
+
+```{r joint df plot, echo=FALSE, fig.height = 3, fig.width = 4.5, fig.align = "center"}
+ggplot(data = joint_df,aes(x=Age, y=Child)) +
+  geom_point(aes(size = Frequency), colour = "#FF9999") +
+  theme_bw()
+```
+All combinations of age and children are **weakly correlated**. The correlation coefficient of age and children is 0.04.
+
+```{r corr plot, echo=FALSE, fig.height = 3, fig.width = 3, fig.align = "center"}
+#cor(us_health_insurrance$age, us_health_insurrance$children, method="pearson")
+ggcorr(us_health_insurrance, label = TRUE, label_round = 3)
+```
+
+## 4. Does the average charge of individuals with children differ from that without children in the Northeast region?
+
+**Step 1 : Define the Hypothesis**
+
+X1 = RV of charges of individuals without children in the northeast region
+X2 = RV of charges of individuals with children in the northeast region
+
+Null hypothesis H0 : mu1 = mu2
+Alternative hypothesis H1 : mu1 != mu2
+
+```{r input 1, echo=FALSE}
+#sample 1
+#individuals without children in the northeast region
+withoutchild_NE <- us_health_insurrance %>%
+  dplyr::select(children, region, charges) %>%
+  dplyr::filter(children == 0 & region == "northeast")
+
+n1 = nrow(withoutchild_NE)
+x1 = mean(withoutchild_NE$charges)
+sigma1 = sd(withoutchild_NE$charges)
+
+#sample 2
+#individuals with children in the northeast region
+withchild_NE <- us_health_insurrance %>%
+  dplyr::select(children, region, charges) %>%
+  dplyr::filter(children != 0 & region == "northeast")
+
+n2 = nrow(withchild_NE)
+x2 = mean(withchild_NE$charges)
+sigma2 = sd(withchild_NE$charges)
+```
+
+**Step 2 : Calculate the Test Statistic**
+
+```{r test statistic 1, include=FALSE}
+mu1 = mu2 = 0
+Zcal = ((x1 - x2) - (mu1 - mu2))/sqrt(((sigma1^2)/n1) + ((sigma2^2)/n2))
+```
+The calculated value of Zcal is `r round(Zcal, 3)`.
+
+**Step 3 : Decision Rule**
+
+```{r decision rule 1, include=FALSE}
+alpha <- 0.05
+qnorm(alpha/2)
+qnorm(1-alpha/2)
+```
+The upper and lower bound of the acceptable region is `r round(qnorm(alpha/2), 3)` and `r round(qnorm(1-alpha/2), 3)`.
+The significance level is 0.05. The value of Zcal `r round(Zcal, 3)` is in the rejection region. Hence, we reject the null hypothesis. 
+
+**Step 4 : P Value**
+
+This is a two-tailed test. Therefore, p-value = 2 * p(z > Zcal).
+```{r p value 1, include=FALSE}
+p_value = 2 * pnorm(Zcal)
+```
+The p-value is `r round(p_value, 3)`.
+P-value is less than alpha (0.05) so we can reject the null hypothesis.
+
+### Conclusion:
+
+We Reject the Null Hypothesis and state that at 5% significance level, the mean average charge of individuals with and without children in the Northeast region are NOT EQUAL.
+
+Hence, the mean average charge of individuals with and without children differ in the Northeast region.
+
+## 5. Does the ratio of individuals who smoke in the Northeast Region differ from that in the Southwest region?
+
+**Step 1 : Define the Hypothesis**
+
+X1 = RV of individuals who smoke in the northeast region
+X2 = RV of individuals who smoke in the southwest region
+
+Null hypothesis H0 : p1 = p2
+Alternative hypothesis H1 : p1 != p2
+
+p1 = Smokers / Total Individuals in the Northeast Region
+p2 = Smokers / Total Individuals in the Southwest Region
+
+```{r input 2, include=FALSE}
+count(us_health_insurrance, region)
+
+#sample 1
+#individuals without children in the northeast region
+smoke_NE <- us_health_insurrance %>%
+  dplyr::select(smoker, region, charges) %>%
+  dplyr::filter(smoker == "yes" & region == "northeast")
+
+n1 = 324
+x1 = nrow(smoke_NE)
+p1_hat = x1/n1
+
+#sample 2
+#individuals with children in the northeast region
+smoke_SW <- us_health_insurrance %>%
+  dplyr::select(smoker, region) %>%
+  dplyr::filter(smoker == "yes" & region == "southwest")
+
+n2 = 325
+x2 = nrow(smoke_SW)
+p2_hat = x2/n2
+
+p_hat = (x1+x2)/(n1+n2)
+```
+
+**Step 2 : Calculate the Test Statistic**
+
+```{r test statistic 2, include=FALSE}
+p1 = p2 = 0
+Zcal = ((p1_hat-p2_hat)-(p1-p2))/(sqrt(p_hat * (1-p_hat) * (1/n1 + 1/n2)))
+```
+The calculated value of Zcal is `r round(Zcal, 3)`.
+
+**Step 3 : Decision Rule**
+
+```{r decision rule 2, include=FALSE}
+alpha <- 0.05
+qnorm(alpha/2)
+qnorm(1-alpha/2)
+```
+The upper and lower bound of the acceptable region is `r round(qnorm(alpha/2), 3)` and `r round(qnorm(1-alpha/2), 3)`.
+The significance level is 0.05. The value of Zcal `r round(Zcal, 3)` is in the acceptable region. Hence, we fail to reject the null hypothesis. 
+
+**Step 4 : P Value**
+
+This is a two-tailed test. Therefore, p-value = 2 * p(z > Zcal).
+```{r p value 2, include=FALSE}
+p_value = 2 * pnorm(Zcal, lower.tail = FALSE)
+```
+The p-value is `r round(p_value, 3)`.
+P-value is greater than alpha (0.05) so we fail to reject the null hypothesis.
+
+### Conclusion:
+
+We Fail to Reject the Null Hypothesis and state that at 5% significance level, the ratio of individuals who smoke in the Northeast Region and the Southeast region are EQUAL. We can also view this graphical in the bar plot on page 3.
+
+Hence, the ratio of individuals who smoke in the Northeast Region do not differ from that in the Southeast region.
+
+## 6. Is the ratio of variances across all regions different for individuals above and below the age of 50 years?
+
+**Step 1 : Define the Hypothesis**
+
+X1 = RV of individuals above and equal to the age of 50
+X2 = RV of individuals below the age of 50
+
+Null hypothesis H0 : sigma1 = sigma2
+Alternative hypothesis H1 : sigma1 != sigma2
+
+```{r input 3, include=FALSE}
+#sample 1
+#individuals without children in the northeast region
+above_50 <- us_health_insurrance %>%
+  dplyr::select(age, charges) %>%
+  filter(age >= 50)
+
+n1 = nrow(above_50)
+s1 = var(us_health_insurrance$charges)
+
+#sample 2
+#individuals with children in the northeast region
+below_50 <- us_health_insurrance %>%
+  dplyr::select(age, charges) %>%
+  filter(age < 50)
+
+n2 = nrow(below_50)
+s2 = var(us_health_insurrance$charges)
+```
+
+**Step 2 : Calculate the Test Statistic**
+
+```{r test statistic 3, include=FALSE}
+sigma1 = sigma2 = 1
+Fcal = s1/s2
+```
+The calculated value of Fcal is `r round(Fcal, 3)`
+
+**Step 3 : Decision Rule**
+
+```{r decision rule 3, include=FALSE}
+alpha <- 0.05
+qf(alpha/2, n1-1, n2-1)
+qf(1-alpha/2, n1-1, n2-1)
+```
+The upper and lower bound of the acceptable region is `r qf(alpha/2, n1-1, n2-1)` and `r qf(1-alpha/2, n1-1, n2-1)`.
+The significance level is 0.05. The value of Fcal `r round(Fcal, 3)` is in the acceptable region. Hence, we fail to reject the null hypothesis. 
+
+### Conclusion:
+
+We Fail to Reject the Null Hypothesis and state that at 5% significance level, the ratio of variances across all regions different for individuals above and below the age of 50 years are EQUAL.
+
+Hence, the ratio of variances of individuals above the age of 50 years do not differ from that below the age of 50 years.
+
+## 7. Distribution Fitting 
+
+### Visualization for BMI  
+
+Before fitting any distribution to a dataset, we will visualize the data in order to get an idea of what distributions are more likely to fit the data as compared to others.
+
+```{r hist 1, echo=FALSE, fig.height = 2, fig.width = 3, fig.align = "center"}
+ggplot(us_health_insurrance, aes(bmi)) +
+  geom_histogram(bins = 50, color = 'Black', fill = '#FF9999') +
+  theme_bw() +
+  ggtitle("Histogram of BMI") +         
+  xlab("BMI of the Individuals") +         
+  ylab("Count")
+```
+From observation, it seems that BMI has a normal like distribution.
+
+### Descriptive Statistics
+
+```{r graph 1, echo=FALSE, out.width = '80%', fig.align = "center"}
+knitr::include_graphics("Graph1.png")
+```
+
+The estimated kurtosis is 2.95. For  the normal distribution, this value should be equal to 3. The estimated skewness is 0.28. Thus, the data is slightly positively skewed.  
+Fitting a normal distribution to the data.    
+
+**Goodness-of-fit Plots**
+```{r fit 1, echo=FALSE, fig.height = 4, fig.width = 5, fig.align = "center"}
+fit_n <- fitdist(us_health_insurrance$bmi, "norm") 
+#summary(fit_n)
+plot(fit_n)
+```
+The AIC and BIC values for the distribution are 8638.264 and 8648.662, respectively.  
+
+### Visualization for Number of Children
+
+Visualizing the data in order to get an idea of what distributions are more likely to fit the data as compared to others.
+
+```{r hist 2, echo=FALSE, fig.height = 2, fig.width = 4, fig.align = "center"}
+ggplot(us_health_insurrance, aes(children)) +
+  geom_histogram(bins = 50, color = 'Black', fill = '#FF9999') +
+  theme_bw() +
+  ggtitle("Histogram of Number of Children") +         
+  xlab("Number of Children") +         
+  ylab("Count")
+```
+
+### Descriptive Statistics
+
+```{r graph 2, echo=FALSE, out.width = '60%', fig.align = "center"}
+knitr::include_graphics("Graph2.png")
+```
+From observation, it seems that the number of children could have a poisson or negative binomial distribution.
+
+Fitting both distributions, to see which distribution gives better results. 
+
+```{r fit 2, include=FALSE, fig.height = 3, fig.width = 4, fig.align = "center"}
+fit_p <- fitdist(us_health_insurrance$children, "pois") 
+summary(fit_p)
+
+fit_nb <- fitdist(us_health_insurrance$children, "nbinom") 
+summary(fit_nb)
+```
+For the poisson distribution, the AIC and BIC values for the distribution are 3892.885 and 3898.084, respectively.  
+For the negative binomial distribution, the AIC and BIC values for the distribution are 3825.728  and 3836.126, respectively. 
+From this test, we see that both negative binomial and poisson distribution fit the data well. However, the negative binomial values are slightly better.
+
+```{r gof 2, include=FALSE, fig.height = 3, fig.width = 4, fig.align = "center"}
+gofstat(list(fit_p, fit_nb))
+```
+
+## 8. Is the proportion of individuals who smoke different across different genders? 
+
+**Step 1 : Define the Hypothesis**
+
+X1 = RV of male individuals who smoke
+X2 = RV of female individuals who smoke
+
+Null hypothesis H0 : p1 = p2
+Alternative hypothesis H1 : p1 != p2
+
+p1 = Male Smokers / Total Male Individuals 
+p2 = Female Smokers / Total Female Individuals 
+
+```{r input 4, include=FALSE}
+
+#sample 1
+#male individuals who smoke
+smoke_male <- us_health_insurrance %>%
+  dplyr::select(smoker, sex) %>%
+  dplyr::filter(smoker == "yes" & sex == "male")
+
+n1 = 676
+x1 = nrow(smoke_male)
+p1_hat = x1/n1
+
+#sample 2
+#female individuals who smoke
+smoke_female <- us_health_insurrance %>%
+  dplyr::select(smoker, sex) %>%
+  dplyr::filter(smoker == "yes" & sex == "female")
+
+n2 = 662
+x2 = nrow(smoke_female)
+p2_hat = x2/n2
+
+p_hat = (x1+x2)/(n1+n2)
+```
+
+**Step 2 : Calculate the Test Statistic**
+
+```{r test statistic 4, echo=FALSE}
+p1 = p2 = 0
+Zcal = ((p1_hat-p2_hat)-(p1-p2))/(sqrt(p_hat * (1-p_hat) * (1/n1 + 1/n2)))
+```
+The calculated value of Zcal is `r round(Zcal, 3)`.
+
+
+**Step 3 : Decision Rule**
+
+```{r decision rule 4, include=FALSE}
+alpha <- 0.05
+qnorm(alpha/2)
+qnorm(1-alpha/2)
+```
+The upper and lower bound of the acceptable region is `r round(qnorm(alpha/2), 3)` and `r round(qnorm(1-alpha/2), 3)`.
+The value of Zcal `r round(Zcal, 3)` is in the rejection region. Hence, we can reject the null hypothesis. 
+
+**Step 4 : P Value**
+
+This is a two-tailed test. Therefore, p-value = 2 * p(z > Zcal).
+```{r p value 4, include=FALSE}
+p_value = 2 * pnorm(Zcal, lower.tail = FALSE)
+```
+The p-value is `r round(p_value, 3)`.
+P-value is less than alpha (0.05) so we reject the null hypothesis.
+
+### Conclusion:
+
+We Reject the Null Hypothesis and state that at 5% significance level, the proportion of individuals who smoke across different genders is NOT EQUAL.
+
+Hence, the proportion of male individuals who smoke is different from that of female individuals who smoke.
+
+This can also be observed using a bar plot as shown below.
+
+```{r fig 4, echo=FALSE, fig.height = 3, fig.width = 4, fig.align = "center"}
+ggplot(us_health_insurrance, aes(x=sex, fill = smoker)) + 
+  geom_bar(stat="count") +
+  scale_fill_brewer(palette="Purples") +
+  theme_bw() +
+  ggtitle("Bar Plot of Sex and Smoking Status") +         
+  xlab("Gender of the Individual") +         
+  ylab("Count")
+```
+
+
